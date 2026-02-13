@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Páscoa na Cabana Amaldiçoada</title>
+    
+    <!-- React & Babel (Para o site funcionar) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Firebase (Banco de Dados) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <!-- Fontes e Ícones -->
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+    <!-- Tailwind CSS (Estilo) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        blood: '#8a0b0b',
+                        darkbg: '#0f0505',
+                        gold: '#ffd700',
+                    },
+                    fontFamily: {
+                        horror: ['Creepster', 'cursive'],
+                        noble: ['Cinzel', 'serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { background-color: #0f0505; color: #e8d7d7; }
+        .glow-text { text-shadow: 0 0 10px #8a0b0b; }
+        .glass-panel {
+            background: rgba(20, 0, 0, 0.8);
+            border: 1px solid #8a0b0b;
+            box-shadow: 0 0 20px rgba(138, 11, 11, 0.3);
+        }
+        /* Animação do Ovo */
+        .egg-spin { animation: float 3s ease-in-out infinite; }
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        
+        // ======================================================
+        // 🔴🔴🔴 ÁREA DE CONFIGURAÇÃO (COLE SUAS CHAVES AQUI) 🔴🔴🔴
+        // Apague tudo dentro das chaves { } abaixo e cole o código do Firebase
+        // ======================================================
+        
+        const firebaseConfig = {  apiKey: "AIzaSyDrrCBqOWLl0Epl0SPZvQDtEfeSgIIkICo",
+  authDomain: "cabanapascoa.firebaseapp.com",
+  projectId: "cabanapascoa",
+  storageBucket: "cabanapascoa.firebasestorage.app",
+  messagingSenderId: "1041169514465",
+  appId: "1:1041169514465:web:a65376b4dc52fd72791ca0"};
+
+        // ======================================================
+        // 🏁 FIM DA CONFIGURAÇÃO - NÃO MEXA ABAIXO DAQUI 🏁
+        // ======================================================
+
+        // Inicializa Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        
+        // Caminho do Banco de Dados
+        const DOC_REF = db.collection('artifacts').document('easter_event').collection('public').document('data');
+
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [leaderboard, setLeaderboard] = useState([]);
+            const [inputCode, setInputCode] = useState("");
+            const [status, setStatus] = useState(""); 
+
+            // 1. Carrega o Placar em Tempo Real
+            useEffect(() => {
+                const unsubscribe = DOC_REF.onSnapshot((doc) => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        const lbData = data.leaderboard || {};
+                        
+                        // Ordena do maior para o menor ponto
+                        const sorted = Object.values(lbData).sort((a, b) => b.score - a.score);
+                        setLeaderboard(sorted);
+                    }
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // 2. Função de Resgatar Código
+            const handleRedeem = async (e) => {
+                e.preventDefault();
+                if (!inputCode) return;
+                setStatus("loading");
+
+                try {
+                    await db.runTransaction(async (transaction) => {
+                        const doc = await transaction.get(DOC_REF);
+                        if (!doc.exists) throw "Erro: Banco de dados não encontrado!";
+
+                        const data = doc.data();
+                        const codes = data.active_codes || {};
+                        const lb = data.leaderboard || {};
+
+                        const code = inputCode.toUpperCase().trim();
+
+                        // Verifica se o código existe
+                        if (codes[code]) {
+                            const points = codes[code];
+                            
+                            // Pergunta o nome do jogador
+                            const userName = prompt(`Código Válido! Você achou ${points} pontos.\nQual seu nome para o ranking?`);
+                            
+                            if(!userName) throw "Nome é obrigatório para pontuar.";
+                            
+                            // Cria um ID simples para o usuário (ex: web_joao)
+                            const userId = "web_" + userName.toLowerCase().replace(/\s/g, ''); 
+
+                            const currentScore = lb[userId]?.score || 0;
+
+                            // Atualiza os dados
+                            lb[userId] = {
+                                name: userName,
+                                score: currentScore + points,
+                                source: 'site'
+                            };
+
+                            delete codes[code]; // Remove o código para ninguém mais usar
+
+                            transaction.update(DOC_REF, {
+                                active_codes: codes,
+                                leaderboard: lb
+                            });
+                            return points;
+                        } else {
+                            throw "Código inválido ou já usado.";
+                        }
+                    });
+                    
+                    setStatus("success");
+                    setInputCode("");
+                    alert("🩸 OFERENDA ACEITA! Pontos adicionados.");
+                } catch (error) {
+                    console.error(error);
+                    setStatus("error");
+                    alert(typeof error === 'string' ? error : "Erro ao conectar com a Cabana.");
+                } finally {
+                    setStatus("");
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center p-4 bg-[url('https://www.transparenttextures.com/patterns/black-scales.png')]">
+                    
+                    {/* Título */}
+                    <header className="text-center mt-8 mb-10">
+                        <h1 className="text-5xl md:text-7xl font-horror text-blood glow-text animate-pulse">
+                            Páscoa na Cabana
+                        </h1>
+                        <p className="text-lg font-noble text-gold mt-2 tracking-widest uppercase border-b border-blood inline-block pb-1">
+                            Evento de Caça aos Ovos Malditos
+                        </p>
+                    </header>
+
+                    <div className="flex flex-col md:flex-row gap-6 w-full max-w-5xl">
+                        
+                        {/* Caixa de Resgate */}
+                        <div className="flex-1 glass-panel p-6 rounded-xl">
+                            <h2 className="text-2xl font-horror text-gold mb-4 text-center">
+                                <i className="fas fa-skull mr-2"></i> Inserir Código
+                            </h2>
+                            
+                            <form onSubmit={handleRedeem} className="flex flex-col gap-4">
+                                <input 
+                                    type="text" 
+                                    value={inputCode}
+                                    onChange={(e) => setInputCode(e.target.value)}
+                                    placeholder="DIGITE AQUI..." 
+                                    className="bg-black/60 border-2 border-blood text-white p-3 text-center font-bold tracking-[3px] text-xl rounded focus:outline-none focus:shadow-[0_0_15px_#8a0b0b] placeholder-red-900/50"
+                                />
+                                <button 
+                                    type="submit" 
+                                    disabled={status === "loading"}
+                                    className="bg-gradient-to-r from-red-900 to-black border border-red-500 text-white font-horror text-xl py-3 rounded hover:brightness-125 transition-all disabled:opacity-50"
+                                >
+                                    {status === "loading" ? "INVOCANDO..." : "RESGATAR PONTOS"}
+                                </button>
+                            </form>
+                            
+                            <div className="mt-6 flex justify-center">
+                                <i className="fas fa-egg text-5xl text-blood egg-spin opacity-80"></i>
+                            </div>
+                        </div>
+
+                        {/* Placar de Líderes */}
+                        <div className="flex-1 glass-panel p-6 rounded-xl">
+                            <h2 className="text-2xl font-horror text-gold mb-4 text-center border-b border-blood/50 pb-2">
+                                Sobreviventes
+                            </h2>
+
+                            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                                {leaderboard.length === 0 ? (
+                                    <div className="text-center py-8 text-gray-500 font-horror text-xl">
+                                        Ninguém pontuou... ainda.
+                                    </div>
+                                ) : (
+                                    leaderboard.map((user, index) => (
+                                        <div key={index} className={`flex items-center justify-between p-3 rounded bg-black/40 border border-white/5 ${index === 0 ? 'border-gold/50 shadow-[0_0_10px_rgba(255,215,0,0.2)]' : ''}`}>
+                                            <div className="flex items-center gap-3">
+                                                <span className={`font-horror text-2xl w-8 text-center ${index === 0 ? 'text-gold' : 'text-gray-600'}`}>
+                                                    #{index + 1}
+                                                </span>
+                                                <div className="flex flex-col">
+                                                    <span className="font-bold text-md text-white font-noble uppercase">{user.name}</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-xl font-horror text-blood">
+                                                {user.score}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                    </div>
+                    
+                    <footer className="mt-12 text-red-900/60 font-horror text-xs text-center">
+                        CABANA AMALDIÇOADA © 2024
+                    </footer>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
